@@ -12,7 +12,10 @@
     "UnoCSS": "⚡ UnoCSS",
     "Counter": "🍍 状态持久化",
     "KeepAlive": "♻️ 页面缓存",
-    "ScrollCache": "📍 滚动缓存",
+    "Specification": "📋 规格书",
+    "ShareConfig": "🔗 分享配置",
+    "ShareResult": "✅ 分享结果",
+    "ShareAccess": "👁️ 查看分享",
     "Login": "🧑‍💻 登录",
     "Register": "🧑‍💻 注册",
     "ForgotPassword": "❓ 忘记密码",
@@ -69,7 +72,7 @@
     "label": "当前组件将会被缓存"
   },
 
-  "scrollCache": {
+  "specification": {
     "sectionTitle": "段落标题",
     "sectionText": "段落内容段落内容段落内容段落内容段落内容段落内容",
     "finished": "已经到底啦 ~",

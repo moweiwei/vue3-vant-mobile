@@ -28,9 +28,14 @@ declare module 'vue-router/auto-routes' {
     'Mock': RouteRecordInfo<'Mock', '/mock', Record<never, never>, Record<never, never>>,
     'Profile': RouteRecordInfo<'Profile', '/profile', Record<never, never>, Record<never, never>>,
     'Register': RouteRecordInfo<'Register', '/register', Record<never, never>, Record<never, never>>,
-    'ScrollCache': RouteRecordInfo<'ScrollCache', '/scroll-cache', Record<never, never>, Record<never, never>>,
     'Settings': RouteRecordInfo<'Settings', '/settings', Record<never, never>, Record<never, never>>,
+    'Specification': RouteRecordInfo<'Specification', '/specification', Record<never, never>, Record<never, never>>,
+    'ShareAccess': RouteRecordInfo<'ShareAccess', '/specification/:itemId/share-access', { itemId: ParamValue<true> }, { itemId: ParamValue<false> }>,
+    'ShareConfig': RouteRecordInfo<'ShareConfig', '/specification/:itemId/share-config', { itemId: ParamValue<true> }, { itemId: ParamValue<false> }>,
+    'ShareResult': RouteRecordInfo<'ShareResult', '/specification/:itemId/share-result', { itemId: ParamValue<true> }, { itemId: ParamValue<false> }>,
+    'Unauthorized': RouteRecordInfo<'Unauthorized', '/unauthorized', Record<never, never>, Record<never, never>>,
     'UnoCSS': RouteRecordInfo<'UnoCSS', '/unocss', Record<never, never>, Record<never, never>>,
+    'WechatAccess': RouteRecordInfo<'WechatAccess', '/wechat/access', Record<never, never>, Record<never, never>>,
   }
 
   /**
@@ -84,16 +89,36 @@ declare module 'vue-router/auto-routes' {
       routes: 'Register'
       views: never
     }
-    'src/pages/scroll-cache/index.vue': {
-      routes: 'ScrollCache'
-      views: never
-    }
     'src/pages/settings/index.vue': {
       routes: 'Settings'
       views: never
     }
+    'src/pages/specification/index.vue': {
+      routes: 'Specification'
+      views: never
+    }
+    'src/pages/specification/[itemId]/share-access.vue': {
+      routes: 'ShareAccess'
+      views: never
+    }
+    'src/pages/specification/[itemId]/share-config.vue': {
+      routes: 'ShareConfig'
+      views: never
+    }
+    'src/pages/specification/[itemId]/share-result.vue': {
+      routes: 'ShareResult'
+      views: never
+    }
+    'src/pages/unauthorized.vue': {
+      routes: 'Unauthorized'
+      views: never
+    }
     'src/pages/unocss/index.vue': {
       routes: 'UnoCSS'
+      views: never
+    }
+    'src/pages/wechat/access.vue': {
+      routes: 'WechatAccess'
       views: never
     }
   }

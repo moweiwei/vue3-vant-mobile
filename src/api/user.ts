@@ -38,3 +38,13 @@ export function resetPassword(): Promise<any> {
 export function register(): Promise<any> {
   return request.post('/user/register')
 }
+
+// 验证 token 是否有效
+export function verifyToken(): Promise<any> {
+  return request.get('/auth/verify-token')
+}
+
+// 获取微信 access token
+export function getWechatAccessToken(code?: string): Promise<any> {
+  return request.post('/auth/wechat/access-token', { code })
+}

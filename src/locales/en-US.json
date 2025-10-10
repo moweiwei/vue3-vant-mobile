@@ -12,7 +12,10 @@
     "UnoCSS": "⚡ UnoCSS",
     "Counter": "🍍 Persistent State",
     "KeepAlive": "♻️ Page Cache",
-    "ScrollCache": "📍 Scroll Cache",
+    "Specification": "📋 Specification",
+    "ShareConfig": "🔗 Share Config",
+    "ShareResult": "✅ Share Result",
+    "ShareAccess": "👁️ View Share",
     "Login": "🧑‍💻 Login",
     "Register": "🧑‍💻 Register",
     "ForgotPassword": "❓ Forgot Password",
@@ -69,7 +72,7 @@
     "label": "The current component will be cached"
   },
 
-  "scrollCache": {
+  "specification": {
     "sectionTitle": "Section title",
     "sectionText": "Section text text text text text text text text text text",
     "finished": "Already at the bottom ~",

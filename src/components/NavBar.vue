@@ -10,8 +10,21 @@ const { t } = useI18n()
  * Located in src/locales/json
  */
 const title = computed(() => {
-  if (route.name) {
+  // 如果有路由名称，使用路由名称
+  if (route.name && typeof route.name === 'string' && !route.name.startsWith('/')) {
     return t(`navbar.${route.name}`)
+  }
+
+  // 降级方案：如果 route.name 是路径格式，尝试从路径推断
+  // 例如：/scroll-cache/ -> ScrollCache
+  if (route.name && typeof route.name === 'string' && route.name.startsWith('/')) {
+    // 从路径提取名称：/scroll-cache/ -> scroll-cache
+    const pathName = route.name.replace(/^\/|\/$/g, '')
+    // 转换为 PascalCase：scroll-cache -> ScrollCache
+    const routeName = pathName.split('-')
+      .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+      .join('')
+    return t(`navbar.${routeName}`)
   }
 
   return t('navbar.Undefined')
@@ -48,3 +61,9 @@ function onBack() {
     @click-left="onBack"
   />
 </template>
+
+<style scoped>
+:deep(.van-nav-bar) {
+  z-index: 2;
+}
+</style>

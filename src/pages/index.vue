@@ -3,6 +3,15 @@ import type { PickerColumn } from 'vant'
 import { languageColumns, locale } from '@/utils/i18n'
 
 const { t } = useI18n()
+const router = useRouter()
+
+// 项目根路由默认进入 /specification 页面
+onMounted(() => {
+  // 如果是从根路径进入（没有 history），自动跳转到 specification
+  if (!window.history.state.back) {
+    router.replace('/specification')
+  }
+})
 
 const checked = computed({
   get: () => isDark.value,
@@ -15,7 +24,8 @@ const menuItems = computed(() => ([
   { title: t('navbar.UnoCSS'), route: 'unocss' },
   { title: t('navbar.Counter'), route: 'counter' },
   { title: t('navbar.KeepAlive'), route: 'keepalive' },
-  { title: t('navbar.ScrollCache'), route: 'scroll-cache' },
+  { title: t('navbar.Specification'), route: 'specification' },
+  { title: '微信授权', route: 'wechat-access' },
   { title: t('navbar.404'), route: 'unknown' },
 ]))
 

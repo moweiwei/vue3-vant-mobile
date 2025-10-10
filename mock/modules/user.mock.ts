@@ -64,4 +64,58 @@ export default defineMock([
       return builder(res)
     },
   },
+  {
+    url: '/api/auth/verify-token',
+    delay: 500,
+    body: ({ headers }) => {
+      // 模拟 token 验证
+      const token = headers['access-token'] || headers['Access-Token']
+
+      if (token && token !== 'expired') {
+        return {
+          code: 0,
+          data: {
+            valid: true,
+          },
+          msg: 'Token 有效',
+        }
+      }
+
+      // 模拟 token 过期
+      return {
+        code: 401,
+        data: {
+          valid: false,
+        },
+        msg: 'Token 已过期',
+      }
+    },
+  },
+  {
+    url: '/api/auth/wechat/access-token',
+    delay: 1000,
+    body: ({ body }) => {
+      // 模拟获取微信 access token
+      const { code } = body || {}
+
+      // 模拟成功场景
+      if (code !== 'invalid') {
+        return {
+          code: 0,
+          data: {
+            token: `wechat_token_${Date.now()}`,
+            expires_in: 7200,
+          },
+          msg: '获取 Token 成功',
+        }
+      }
+
+      // 模拟失败场景
+      return {
+        code: 400,
+        data: null,
+        msg: '获取 Token 失败',
+      }
+    },
+  },
 ])

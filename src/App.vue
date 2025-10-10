@@ -46,7 +46,7 @@ const mode = computed(() => {
         </keep-alive>
       </section>
     </router-view>
-    <tab-bar />
+    <!-- <tab-bar /> -->
   </van-config-provider>
 </template>
 
