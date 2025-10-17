@@ -12,6 +12,7 @@ export interface ProjectListParams {
   page: number
   pageSize: number
   type: 'current' | 'shared' // current: 当前列表, shared: 分享列表
+  keyword?: string // 搜索关键词（可选）
 }
 
 export interface ProjectListRes {
@@ -29,8 +30,14 @@ interface ApiResponse<T> {
 /**
  * 获取项目列表
  */
-export async function getProjectList(params: ProjectListParams): Promise<ProjectListRes> {
-  const res = await request.get<ApiResponse<ProjectListRes>>('/project/list', { params })
+export async function getProjectList(
+  params: ProjectListParams,
+  options?: { signal?: AbortSignal },
+): Promise<ProjectListRes> {
+  const res = await request.get<ApiResponse<ProjectListRes>>('/project/list', {
+    params,
+    signal: options?.signal,
+  })
   return res.data
 }
 

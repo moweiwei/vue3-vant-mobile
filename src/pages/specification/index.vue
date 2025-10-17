@@ -17,17 +17,38 @@ const activeTab = ref(0)
 // 搜索关键词
 const searchKeyword = ref('')
 
-// 当前列表数据
-const currentList = ref<ListItem[]>([])
-const currentLoading = ref(false)
-const currentFinished = ref(false)
-const currentPage = ref(1)
+// 搜索请求的 AbortController，用于取消上一次未完成的搜索请求
+let searchAbortController: AbortController | null = null
 
-// 分享列表数据
-const sharedList = ref<ListItem[]>([])
-const sharedLoading = ref(false)
-const sharedFinished = ref(false)
-const sharedPage = ref(1)
+// 搜索请求ID，用于验证返回的结果是否是最新的请求
+let searchRequestId = 0
+
+// 列表加载请求ID，用于验证返回的结果是否是最新的请求
+const listRequestId = {
+  current: 0,
+  shared: 0,
+}
+
+// 列表数据管理（使用对象统一管理两个 tab 的状态）
+const listState = ref({
+  current: {
+    list: [] as ListItem[],
+    loading: false,
+    finished: false,
+    page: 1,
+  },
+  shared: {
+    list: [] as ListItem[],
+    loading: false,
+    finished: false,
+    page: 1,
+  },
+})
+
+// 获取当前激活的列表状态
+const activeListState = computed(() => {
+  return activeTab.value === 0 ? listState.value.current : listState.value.shared
+})
 
 // Radio 选中的项
 const selectedRadio = ref<ListItem | null>(null)
@@ -43,131 +64,241 @@ const searchFixed = ref(false)
 const searchContainerRef = ref<HTMLElement>()
 
 // 计算属性：根据当前 tab 获取对应的列表
-const loading = computed(() => activeTab.value === 0 ? currentLoading.value : sharedLoading.value)
+const loading = computed(() => activeListState.value.loading)
 const finished = computed(() => {
   // 搜索时不显示 finished 状态
   if (searchKeyword.value.trim()) {
     return true
   }
-  return activeTab.value === 0 ? currentFinished.value : sharedFinished.value
+  return activeListState.value.finished
 })
-const rawList = computed(() => activeTab.value === 0 ? currentList.value : sharedList.value)
+const rawList = computed(() => activeListState.value.list)
+
+// 搜索结果列表（用于远程搜索）
+const searchResultList = ref<ListItem[]>([])
+const isSearching = ref(false)
+
+// 防抖定时器
+let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null
 
 // 过滤后的列表（根据搜索关键词）
 const filteredList = computed(() => {
-  if (!searchKeyword.value.trim()) {
-    return rawList.value
+  // 如果有搜索关键词，返回搜索结果
+  if (searchKeyword.value.trim()) {
+    return searchResultList.value
   }
-  const keyword = searchKeyword.value.toLowerCase().trim()
-  return rawList.value.filter(item =>
-    item.title.toLowerCase().includes(keyword)
-    || item.summary.toLowerCase().includes(keyword)
-    || item.details.toLowerCase().includes(keyword),
-  )
+  // 否则返回原始列表
+  return rawList.value
 })
 
-// 加载当前列表
-async function loadCurrentList() {
-  try {
-    currentLoading.value = true
-
-    const res = await getProjectList({
-      page: currentPage.value,
-      pageSize: 10,
-      type: 'current',
-    })
-
-    // 将新数据追加到列表
-    currentList.value.push(...res.list)
-
-    // 更新状态
-    currentFinished.value = !res.hasMore
-
-    // 如果还有更多数据，页码加1
-    if (res.hasMore) {
-      currentPage.value++
-    }
+// 执行搜索（远程搜索）
+async function performSearch(keyword: string) {
+  // 取消上一次未完成的搜索请求
+  if (searchAbortController) {
+    searchAbortController.abort()
   }
-  catch (error) {
-    console.error('加载当前列表失败:', error)
-    showToast('加载失败，请重试')
-    currentFinished.value = true
-  }
-  finally {
-    currentLoading.value = false
-  }
-}
 
-// 加载分享列表
-async function loadSharedList() {
-  try {
-    sharedLoading.value = true
-
-    const res = await getProjectList({
-      page: sharedPage.value,
-      pageSize: 10,
-      type: 'shared',
-    })
-
-    // 将新数据追加到列表
-    sharedList.value.push(...res.list)
-
-    // 更新状态
-    sharedFinished.value = !res.hasMore
-
-    // 如果还有更多数据，页码加1
-    if (res.hasMore) {
-      sharedPage.value++
-    }
-  }
-  catch (error) {
-    console.error('加载分享列表失败:', error)
-    showToast('加载失败，请重试')
-    sharedFinished.value = true
-  }
-  finally {
-    sharedLoading.value = false
-  }
-}
-
-// 统一的加载函数
-function onLoad() {
-  // 如果正在搜索，不加载更多
-  if (searchKeyword.value.trim()) {
-    if (activeTab.value === 0) {
-      currentLoading.value = false
-    }
-    else {
-      sharedLoading.value = false
-    }
+  if (!keyword.trim()) {
+    searchResultList.value = []
+    isSearching.value = false
     return
   }
 
-  if (activeTab.value === 0) {
-    currentLoading.value = true
-    loadCurrentList()
+  // 生成新的请求ID（递增）
+  searchRequestId++
+  const currentRequestId = searchRequestId
+
+  // 捕获当前的 tab 类型，避免在请求过程中 tab 切换导致类型不一致
+  const currentType = activeTab.value === 0 ? 'current' : 'shared'
+  const trimmedKeyword = keyword.trim()
+
+  try {
+    isSearching.value = true
+
+    // 创建新的 AbortController
+    searchAbortController = new AbortController()
+
+    // 远程搜索：调用后端接口
+    const res = await getProjectList({
+      page: 1,
+      pageSize: 50, // 搜索时可以返回更多结果
+      type: currentType,
+      keyword: trimmedKeyword,
+    }, {
+      signal: searchAbortController.signal,
+    })
+
+    // 关键：验证这个结果是否还是最新的请求
+    // 如果请求ID不匹配，说明已经有新的搜索请求发出，丢弃这个旧结果
+    if (currentRequestId !== searchRequestId) {
+      // 丢弃过期的搜索结果
+      return
+    }
+
+    // 再次验证当前搜索关键词是否还匹配（用户可能已经清空或修改）
+    if (searchKeyword.value.trim() !== trimmedKeyword) {
+      // 搜索关键词已变化，丢弃结果
+      return
+    }
+
+    // 验证 tab 是否被切换
+    const latestType = activeTab.value === 0 ? 'current' : 'shared'
+    if (currentType !== latestType) {
+      // Tab已切换，丢弃结果
+      return
+    }
+
+    // 所有验证通过，更新搜索结果
+    searchResultList.value = res.list
   }
-  else {
-    sharedLoading.value = true
-    loadSharedList()
+  catch (error: any) {
+    // 如果是主动取消的请求，不做处理
+    if (error?.name === 'AbortError' || error?.name === 'CanceledError') {
+      return
+    }
+
+    // 只有在这是最新请求时才显示错误
+    if (currentRequestId === searchRequestId) {
+      console.error('搜索失败:', error)
+      showToast('搜索失败，请重试')
+    }
   }
+  finally {
+    // 只有在这是最新请求时才关闭 loading 状态
+    if (currentRequestId === searchRequestId) {
+      isSearching.value = false
+    }
+  }
+}
+
+// 防抖搜索函数
+function debouncedSearch(keyword: string) {
+  // 清除之前的定时器
+  if (searchDebounceTimer) {
+    clearTimeout(searchDebounceTimer)
+  }
+
+  // 如果关键词为空，立即清空搜索结果
+  if (!keyword.trim()) {
+    performSearch('')
+    return
+  }
+
+  // 设置新的定时器，延迟 300ms 执行搜索
+  searchDebounceTimer = setTimeout(() => {
+    performSearch(keyword)
+  }, 300)
+}
+
+// 监听搜索关键词变化
+watch(searchKeyword, (newKeyword) => {
+  debouncedSearch(newKeyword)
+})
+
+// 统一的加载列表函数
+async function loadList(type: 'current' | 'shared') {
+  const state = listState.value[type]
+
+  // 生成新的请求ID
+  listRequestId[type]++
+  const currentRequestId = listRequestId[type]
+
+  // 捕获当前页码，避免在请求过程中被修改
+  const currentPage = state.page
+
+  try {
+    state.loading = true
+
+    const res = await getProjectList({
+      page: currentPage,
+      pageSize: 10,
+      type,
+    })
+
+    // 验证这个结果是否还是最新的请求
+    if (currentRequestId !== listRequestId[type]) {
+      // 丢弃过期的列表加载结果
+      return
+    }
+
+    // 验证页码是否还匹配（防止在请求过程中被重置）
+    if (state.page !== currentPage) {
+      // 页码已变化，丢弃结果
+      return
+    }
+
+    // 所有验证通过，更新列表数据
+    state.list.push(...res.list)
+
+    // 更新状态
+    state.finished = !res.hasMore
+
+    // 如果还有更多数据，页码加1
+    if (res.hasMore) {
+      state.page++
+    }
+  }
+  catch (error) {
+    // 只有在这是最新请求时才显示错误
+    if (currentRequestId === listRequestId[type]) {
+      console.error(`加载${type === 'current' ? '当前' : '分享'}列表失败:`, error)
+      showToast('加载失败，请重试')
+      state.finished = true
+    }
+  }
+  finally {
+    // 只有在这是最新请求时才关闭 loading 状态
+    if (currentRequestId === listRequestId[type]) {
+      state.loading = false
+    }
+  }
+}
+
+// 触发加载的函数
+function onLoad() {
+  // 如果正在搜索，不加载更多
+  if (searchKeyword.value.trim()) {
+    activeListState.value.loading = false
+    return
+  }
+
+  const type = activeTab.value === 0 ? 'current' : 'shared'
+  activeListState.value.loading = true
+  loadList(type)
 }
 
 // 切换 Tab
 function onTabChange() {
-  // 清空搜索关键词
+  // 取消正在进行的搜索
+  if (searchAbortController) {
+    searchAbortController.abort()
+    searchAbortController = null
+  }
+  // 清除防抖定时器
+  if (searchDebounceTimer) {
+    clearTimeout(searchDebounceTimer)
+    searchDebounceTimer = null
+  }
+
+  // 递增搜索请求ID，使所有旧请求的结果失效
+  searchRequestId++
+
+  // 清空搜索关键词和结果
   searchKeyword.value = ''
+  searchResultList.value = []
+  isSearching.value = false
+
   // 重置选中状态
   selectedRadio.value = null
   activeNames.value = []
 
   // 如果切换到的列表为空，主动触发加载
   nextTick(() => {
-    if (activeTab.value === 0 && currentList.value.length === 0 && !currentFinished.value) {
-      loadCurrentList()
-    }
-    else if (activeTab.value === 1 && sharedList.value.length === 0 && !sharedFinished.value) {
-      loadSharedList()
+    const type = activeTab.value === 0 ? 'current' : 'shared'
+    const state = listState.value[type]
+
+    if (state.list.length === 0 && !state.finished) {
+      loadList(type)
     }
   })
 }
@@ -226,6 +357,18 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener('scroll', handleScroll)
+
+  // 清理搜索相关资源
+  if (searchAbortController) {
+    searchAbortController.abort()
+    searchAbortController = null
+  }
+  if (searchDebounceTimer) {
+    clearTimeout(searchDebounceTimer)
+    searchDebounceTimer = null
+  }
+  // 递增请求ID，使所有旧请求失效
+  searchRequestId++
 })
 
 onActivated(() => {
@@ -236,6 +379,18 @@ onActivated(() => {
 
 onDeactivated(() => {
   window.removeEventListener('scroll', handleScroll)
+
+  // 清理搜索相关资源
+  if (searchAbortController) {
+    searchAbortController.abort()
+    searchAbortController = null
+  }
+  if (searchDebounceTimer) {
+    clearTimeout(searchDebounceTimer)
+    searchDebounceTimer = null
+  }
+  // 递增请求ID，使所有旧请求失效
+  searchRequestId++
 })
 
 onBeforeRouteLeave(() => {
@@ -300,7 +455,7 @@ onBeforeRouteLeave(() => {
     >
       <!-- 空状态提示 -->
       <van-empty
-        v-if="searchKeyword && filteredList.length === 0"
+        v-if="searchKeyword && filteredList.length === 0 && !isSearching"
         image="search"
         description="暂无搜索结果"
       >
