@@ -2,6 +2,7 @@
 import type { ProjectItem } from '@/api/project'
 import { showToast } from 'vant'
 import { getProjectList } from '@/api/project'
+import { useSearchController } from '@/composables/useAsyncSearchAbort'
 
 defineOptions({
   name: 'Specification',
@@ -14,31 +15,35 @@ const router = useRouter()
 // Tab 相关
 const activeTab = ref(0)
 
-// 搜索关键词
-const searchKeyword = ref('')
-
-// 搜索请求的 AbortController，用于取消上一次未完成的搜索请求
-let searchAbortController: AbortController | null = null
-
-// 搜索请求ID，用于验证返回的结果是否是最新的请求
-let searchRequestId = 0
-
 // 列表加载请求ID，用于验证返回的结果是否是最新的请求
 const listRequestId = {
   current: 0,
   shared: 0,
 }
 
-// 列表数据管理（使用对象统一管理两个 tab 的状态）
+// 统一的列表状态管理（包含搜索和分页）
 const listState = ref({
   current: {
-    list: [] as ListItem[],
+    // 当前显示的列表（可能是搜索结果或分页列表）
+    displayList: [] as ListItem[],
+    // 原始分页列表（用于搜索清空后恢复）
+    rawList: [] as ListItem[],
+    // 搜索关键词
+    searchKeyword: '',
+    // 是否处于搜索模式
+    isSearchMode: false,
+    // 加载状态
     loading: false,
+    // 是否加载完成（搜索模式下表示搜索完成，分页模式下表示无更多数据）
     finished: false,
+    // 分页页码
     page: 1,
   },
   shared: {
-    list: [] as ListItem[],
+    displayList: [] as ListItem[],
+    rawList: [] as ListItem[],
+    searchKeyword: '',
+    isSearchMode: false,
     loading: false,
     finished: false,
     page: 1,
@@ -63,139 +68,93 @@ const activeNames = ref<number[]>([])
 const searchFixed = ref(false)
 const searchContainerRef = ref<HTMLElement>()
 
-// 计算属性：根据当前 tab 获取对应的列表
-const loading = computed(() => activeListState.value.loading)
-const finished = computed(() => {
-  // 搜索时不显示 finished 状态
-  if (searchKeyword.value.trim()) {
-    return true
-  }
-  return activeListState.value.finished
-})
-const rawList = computed(() => activeListState.value.list)
-
-// 搜索结果列表（用于远程搜索）
-const searchResultList = ref<ListItem[]>([])
-const isSearching = ref(false)
-
-// 防抖定时器
-let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null
-
-// 过滤后的列表（根据搜索关键词）
-const filteredList = computed(() => {
-  // 如果有搜索关键词，返回搜索结果
-  if (searchKeyword.value.trim()) {
-    return searchResultList.value
-  }
-  // 否则返回原始列表
-  return rawList.value
-})
-
-// 执行搜索（远程搜索）
-async function performSearch(keyword: string) {
-  // 取消上一次未完成的搜索请求
-  if (searchAbortController) {
-    searchAbortController.abort()
-  }
-
-  if (!keyword.trim()) {
-    searchResultList.value = []
-    isSearching.value = false
-    return
-  }
-
-  // 生成新的请求ID（递增）
-  searchRequestId++
-  const currentRequestId = searchRequestId
-
-  // 捕获当前的 tab 类型，避免在请求过程中 tab 切换导致类型不一致
-  const currentType = activeTab.value === 0 ? 'current' : 'shared'
-  const trimmedKeyword = keyword.trim()
-
-  try {
-    isSearching.value = true
-
-    // 创建新的 AbortController
-    searchAbortController = new AbortController()
-
-    // 远程搜索：调用后端接口
+// 创建搜索控制器（为每个 tab 创建独立实例）
+const currentSearchController = useSearchController<ListItem>(
+  async (keyword: string, signal?: AbortSignal) => {
     const res = await getProjectList({
       page: 1,
-      pageSize: 50, // 搜索时可以返回更多结果
-      type: currentType,
-      keyword: trimmedKeyword,
-    }, {
-      signal: searchAbortController.signal,
-    })
-
-    // 关键：验证这个结果是否还是最新的请求
-    // 如果请求ID不匹配，说明已经有新的搜索请求发出，丢弃这个旧结果
-    if (currentRequestId !== searchRequestId) {
-      // 丢弃过期的搜索结果
-      return
-    }
-
-    // 再次验证当前搜索关键词是否还匹配（用户可能已经清空或修改）
-    if (searchKeyword.value.trim() !== trimmedKeyword) {
-      // 搜索关键词已变化，丢弃结果
-      return
-    }
-
-    // 验证 tab 是否被切换
-    const latestType = activeTab.value === 0 ? 'current' : 'shared'
-    if (currentType !== latestType) {
-      // Tab已切换，丢弃结果
-      return
-    }
-
-    // 所有验证通过，更新搜索结果
-    searchResultList.value = res.list
-  }
-  catch (error: any) {
-    // 如果是主动取消的请求，不做处理
-    if (error?.name === 'AbortError' || error?.name === 'CanceledError') {
-      return
-    }
-
-    // 只有在这是最新请求时才显示错误
-    if (currentRequestId === searchRequestId) {
-      console.error('搜索失败:', error)
+      pageSize: 50,
+      type: 'current',
+      keyword,
+    }, { signal })
+    return res.list
+  },
+  {
+    delay: 300,
+    onSuccess: (data) => {
+      const state = listState.value.current
+      state.displayList = data
+      state.isSearchMode = true
+      state.loading = false
+      state.finished = true
+    },
+    onError: () => {
+      const state = listState.value.current
+      state.loading = false
+      state.finished = true
       showToast('搜索失败，请重试')
-    }
-  }
-  finally {
-    // 只有在这是最新请求时才关闭 loading 状态
-    if (currentRequestId === searchRequestId) {
-      isSearching.value = false
-    }
-  }
-}
+    },
+    onClear: () => {
+      const state = listState.value.current
+      state.displayList = state.rawList
+      state.isSearchMode = false
+      state.finished = state.rawList.length === 0 || state.page > 1
+    },
+  },
+)
 
-// 防抖搜索函数
-function debouncedSearch(keyword: string) {
-  // 清除之前的定时器
-  if (searchDebounceTimer) {
-    clearTimeout(searchDebounceTimer)
-  }
+const sharedSearchController = useSearchController<ListItem>(
+  async (keyword: string, signal?: AbortSignal) => {
+    const res = await getProjectList({
+      page: 1,
+      pageSize: 50,
+      type: 'shared',
+      keyword,
+    }, { signal })
+    return res.list
+  },
+  {
+    delay: 300,
+    onSuccess: (data) => {
+      const state = listState.value.shared
+      state.displayList = data
+      state.isSearchMode = true
+      state.loading = false
+      state.finished = true
+    },
+    onError: () => {
+      const state = listState.value.shared
+      state.loading = false
+      state.finished = true
+      showToast('搜索失败，请重试')
+    },
+    onClear: () => {
+      const state = listState.value.shared
+      state.displayList = state.rawList
+      state.isSearchMode = false
+      state.finished = state.rawList.length === 0 || state.page > 1
+    },
+  },
+)
 
-  // 如果关键词为空，立即清空搜索结果
-  if (!keyword.trim()) {
-    performSearch('')
-    return
-  }
-
-  // 设置新的定时器，延迟 300ms 执行搜索
-  searchDebounceTimer = setTimeout(() => {
-    performSearch(keyword)
-  }, 300)
-}
-
-// 监听搜索关键词变化
-watch(searchKeyword, (newKeyword) => {
-  debouncedSearch(newKeyword)
+// 获取当前激活的搜索控制器
+const activeSearchController = computed(() => {
+  return activeTab.value === 0 ? currentSearchController : sharedSearchController
 })
 
-// 统一的加载列表函数
+// 简化后的计算属性（无需状态切换）
+const displayList = computed(() => activeListState.value.displayList)
+const loading = computed(() => activeListState.value.loading)
+const finished = computed(() => activeListState.value.finished)
+const searchKeyword = computed({
+  get: () => activeListState.value.searchKeyword,
+  set: (val: string) => {
+    activeListState.value.searchKeyword = val
+  },
+})
+const isSearchMode = computed(() => activeListState.value.isSearchMode)
+
+// 统一的加载列表函数（分页加载）
 async function loadList(type: 'current' | 'shared') {
   const state = listState.value[type]
 
@@ -228,7 +187,12 @@ async function loadList(type: 'current' | 'shared') {
     }
 
     // 所有验证通过，更新列表数据
-    state.list.push(...res.list)
+    state.rawList.push(...res.list)
+
+    // 如果不在搜索模式，同步更新显示列表
+    if (!state.isSearchMode) {
+      state.displayList = state.rawList
+    }
 
     // 更新状态
     state.finished = !res.hasMore
@@ -256,37 +220,40 @@ async function loadList(type: 'current' | 'shared') {
 
 // 触发加载的函数
 function onLoad() {
+  const state = activeListState.value
+
   // 如果正在搜索，不加载更多
-  if (searchKeyword.value.trim()) {
-    activeListState.value.loading = false
+  if (state.isSearchMode) {
     return
   }
 
   const type = activeTab.value === 0 ? 'current' : 'shared'
-  activeListState.value.loading = true
   loadList(type)
 }
 
+// 处理搜索关键词变化
+watch(searchKeyword, (keyword) => {
+  const state = activeListState.value
+
+  // 开始加载
+  state.loading = true
+  state.finished = false
+
+  // 触发搜索控制器
+  activeSearchController.value.search(keyword)
+})
+
 // 切换 Tab
 function onTabChange() {
-  // 取消正在进行的搜索
-  if (searchAbortController) {
-    searchAbortController.abort()
-    searchAbortController = null
-  }
-  // 清除防抖定时器
-  if (searchDebounceTimer) {
-    clearTimeout(searchDebounceTimer)
-    searchDebounceTimer = null
-  }
+  // 取消所有进行中的搜索请求
+  currentSearchController.cancel()
+  sharedSearchController.cancel()
 
-  // 递增搜索请求ID，使所有旧请求的结果失效
-  searchRequestId++
-
-  // 清空搜索关键词和结果
-  searchKeyword.value = ''
-  searchResultList.value = []
-  isSearching.value = false
+  // 清空搜索关键词（会自动触发 onClear 恢复显示列表）
+  const currentState = listState.value.current
+  const sharedState = listState.value.shared
+  currentState.searchKeyword = ''
+  sharedState.searchKeyword = ''
 
   // 重置选中状态
   selectedRadio.value = null
@@ -297,7 +264,7 @@ function onTabChange() {
     const type = activeTab.value === 0 ? 'current' : 'shared'
     const state = listState.value[type]
 
-    if (state.list.length === 0 && !state.finished) {
+    if (state.rawList.length === 0 && !state.finished) {
       loadList(type)
     }
   })
@@ -357,18 +324,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener('scroll', handleScroll)
-
-  // 清理搜索相关资源
-  if (searchAbortController) {
-    searchAbortController.abort()
-    searchAbortController = null
-  }
-  if (searchDebounceTimer) {
-    clearTimeout(searchDebounceTimer)
-    searchDebounceTimer = null
-  }
-  // 递增请求ID，使所有旧请求失效
-  searchRequestId++
+  // 搜索资源会由 hook 自动清理
 })
 
 onActivated(() => {
@@ -379,18 +335,9 @@ onActivated(() => {
 
 onDeactivated(() => {
   window.removeEventListener('scroll', handleScroll)
-
-  // 清理搜索相关资源
-  if (searchAbortController) {
-    searchAbortController.abort()
-    searchAbortController = null
-  }
-  if (searchDebounceTimer) {
-    clearTimeout(searchDebounceTimer)
-    searchDebounceTimer = null
-  }
-  // 递增请求ID，使所有旧请求失效
-  searchRequestId++
+  // 清理搜索资源
+  currentSearchController.cleanup()
+  sharedSearchController.cleanup()
 })
 
 onBeforeRouteLeave(() => {
@@ -455,7 +402,7 @@ onBeforeRouteLeave(() => {
     >
       <!-- 空状态提示 -->
       <van-empty
-        v-if="searchKeyword && filteredList.length === 0 && !isSearching"
+        v-if="isSearchMode && displayList.length === 0 && !loading"
         image="search"
         description="暂无搜索结果"
       >
@@ -466,7 +413,7 @@ onBeforeRouteLeave(() => {
 
       <!-- 列表为空提示 -->
       <van-empty
-        v-else-if="!searchKeyword && rawList.length === 0 && finished"
+        v-else-if="!isSearchMode && displayList.length === 0 && finished"
         image="default"
         :description="activeTab === 0 ? '暂无当前列表数据' : '暂无分享列表数据'"
       />
@@ -474,7 +421,7 @@ onBeforeRouteLeave(() => {
       <div v-else class="list-container">
         <van-collapse v-model="activeNames" class="custom-collapse">
           <van-collapse-item
-            v-for="item in filteredList"
+            v-for="item in displayList"
             :key="item.id"
             :name="item.id"
             :border="false"
